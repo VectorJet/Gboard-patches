@@ -1,0 +1,67 @@
+name: Build navfix overlay
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'navfix/**'
+      - '.github/workflows/build-navfix.yml'
+    branches:
+      - main
+  release:
+    types: [published]
+
+jobs:
+  build:
+    name: Build navfix RRO
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install platform + build-tools
+        run: |
+          sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
+          echo "$ANDROID_HOME/build-tools/34.0.0" >> "$GITHUB_PATH"
+
+      - name: Compile + link overlay
+        run: |
+          set -eux
+          mkdir -p navfix/build/compiled navfix/build/out
+          aapt2 compile --dir navfix/res -o navfix/build/compiled/navfix.zip
+          aapt2 link -o navfix/build/out/navfix.apk \
+            -I "$ANDROID_HOME/platforms/android-34/android.jar" \
+            --manifest navfix/AndroidManifest.xml \
+            navfix/build/compiled/navfix.zip \
+            --auto-add-overlay
+          ls -lh navfix/build/out/navfix.apk
+          aapt2 dump resources navfix/build/out/navfix.apk | head -n 40 || true
+
+      - name: Sign APK (ephemeral debug key, no secrets needed)
+        run: |
+          set -eux
+          keytool -genkeypair -v -keystore /tmp/navfix-debug.jks -alias navfix \
+            -keyalg RSA -keysize 2048 -validity 10950 \
+            -storepass android -keypass android \
+            -dname "CN=navfix, OU=dev, O=vectorjet, C=US"
+          apksigner sign --ks /tmp/navfix-debug.jks --ks-pass:android \
+            --key-pass:android --out navfix/build/out/navfix-signed.apk \
+            navfix/build/out/navfix.apk
+          ls -lh navfix/build/out/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: navfix-apk
+          path: navfix/build/out/*.apk
