@@ -132,6 +132,7 @@ public final class GboardRoundedKeyboardSettingsFeature
                             snapshot.getTopRadiusDp()),
                     () -> showRadiusDialog(host, preferences, false,
                             snapshot.getBottomRadiusDp()),
+                    () -> showBottomGapDialog(host, preferences, snapshot.getBottomGapDp()),
                     () -> completeWrite(host,
                             GboardRoundedKeyboardSettings.restoreDefaultRadii(preferences)));
         } catch (Throwable failure) {
@@ -146,6 +147,7 @@ public final class GboardRoundedKeyboardSettingsFeature
             Runnable modeAction,
             Runnable topRadiusAction,
             Runnable bottomRadiusAction,
+            Runnable bottomGapAction,
             Runnable resetAction) {
         boolean enabled = snapshot.isEnabled();
         GboardRoundedKeyboardConfig.Mode mode = snapshot.getMode();
@@ -166,6 +168,11 @@ public final class GboardRoundedKeyboardSettingsFeature
                 radiusLabel(snapshot.getBottomRadiusDp()),
                 enabled && mode != GboardRoundedKeyboardConfig.Mode.TOP,
                 bottomRadiusAction));
+        rows.add(new GboardPatchesSettingsContract.SelectorRow(
+                "底部間隙 / Bottom gap",
+                "鍵盤底部與導覽藥丸的距離，4dp 剛好貼齊，0dp 完全貼底\nGap between keyboard bottom and gesture pill; 4dp sits just on top",
+                snapshot.getBottomGapDp() + " dp",
+                enabled, bottomGapAction));
         List<GboardPatchesSettingsContract.Row> advancedRows =
                 Collections.singletonList(new GboardPatchesSettingsContract.DangerRow(
                         resetTitle,
@@ -227,6 +234,34 @@ public final class GboardRoundedKeyboardSettingsFeature
                             : GboardRoundedKeyboardSettings.writeBottomRadiusDp(
                                     preferences, radiusDp));
                 });
+    }
+
+    private void showBottomGapDialog(GboardPatchesSettingsContract.FeatureHost host,
+            SharedPreferences preferences, int currentGapDp) {
+        GboardPatchesSettingsContract.showTextInputDialog(
+                host,
+                "底部間隙 / Bottom gap",
+                "0~32 dp，建議 4dp 剛好貼齊藥丸",
+                Integer.toString(currentGapDp),
+                value -> {
+                    int gapDp = parseBottomGapDp(value);
+                    completeWrite(host, GboardRoundedKeyboardSettings.writeBottomGapDp(
+                            preferences, gapDp));
+                });
+    }
+
+    int parseBottomGapDp(String value) {
+        final int parsed;
+        try {
+            parsed = Integer.parseInt(value == null ? "" : value.trim());
+        } catch (NumberFormatException failure) {
+            throw new IllegalArgumentException(radiusDialogError);
+        }
+        if (parsed < GboardRoundedKeyboardConfig.MIN_BOTTOM_GAP_DP
+                || parsed > GboardRoundedKeyboardConfig.MAX_BOTTOM_GAP_DP) {
+            throw new IllegalArgumentException(radiusDialogError);
+        }
+        return parsed;
     }
 
     int parseRadiusDp(String value) {

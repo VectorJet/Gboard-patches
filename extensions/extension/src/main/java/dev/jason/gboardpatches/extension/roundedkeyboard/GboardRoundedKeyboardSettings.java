@@ -11,6 +11,8 @@ public final class GboardRoundedKeyboardSettings {
             "pref_rounded_keyboard_panel_top_radius_dp";
     public static final String PREF_KEY_BOTTOM_RADIUS_DP =
             "pref_rounded_keyboard_panel_bottom_radius_dp";
+    public static final String PREF_KEY_BOTTOM_GAP_DP =
+            "pref_rounded_keyboard_panel_bottom_gap_dp";
 
     private GboardRoundedKeyboardSettings() {
     }
@@ -36,10 +38,12 @@ public final class GboardRoundedKeyboardSettings {
             GboardRoundedKeyboardConfig.Mode mode = readMode(values, preferences);
             Integer top = readRadius(values, preferences, PREF_KEY_TOP_RADIUS_DP);
             Integer bottom = readRadius(values, preferences, PREF_KEY_BOTTOM_RADIUS_DP);
-            if (enabled == null || mode == null || top == null || bottom == null) {
+            Integer gap = readBottomGap(values, preferences);
+            if (enabled == null || mode == null || top == null || bottom == null
+                    || gap == null) {
                 return null;
             }
-            return new GboardRoundedKeyboardConfig(enabled, mode, top, bottom);
+            return new GboardRoundedKeyboardConfig(enabled, mode, top, bottom, gap);
         } catch (Throwable ignored) {
             return null;
         }
@@ -58,6 +62,8 @@ public final class GboardRoundedKeyboardSettings {
                             Integer.toString(snapshot.getTopRadiusDp()))
                     .putString(PREF_KEY_BOTTOM_RADIUS_DP,
                             Integer.toString(snapshot.getBottomRadiusDp()))
+                    .putString(PREF_KEY_BOTTOM_GAP_DP,
+                            Integer.toString(snapshot.getBottomGapDp()))
                     .commit();
         } catch (Throwable ignored) {
             // The settings feature provides its own warning fallback.
@@ -82,6 +88,12 @@ public final class GboardRoundedKeyboardSettings {
 
     public static boolean writeBottomRadiusDp(SharedPreferences preferences, int radiusDp) {
         return writeRadius(preferences, PREF_KEY_BOTTOM_RADIUS_DP, radiusDp);
+    }
+
+    public static boolean writeBottomGapDp(SharedPreferences preferences, int gapDp) {
+        int value = GboardRoundedKeyboardConfig.sanitizeBottomGapDp(gapDp);
+        return commit(preferences,
+                editor -> editor.putString(PREF_KEY_BOTTOM_GAP_DP, Integer.toString(value)));
     }
 
     public static boolean restoreDefaultRadii(SharedPreferences preferences) {
@@ -148,6 +160,30 @@ public final class GboardRoundedKeyboardSettings {
         }
         if (parsed < GboardRoundedKeyboardConfig.MIN_RADIUS_DP
                 || parsed > GboardRoundedKeyboardConfig.MAX_RADIUS_DP) {
+            return null;
+        }
+        return parsed;
+    }
+
+    private static Integer readBottomGap(Map<String, ?> values, SharedPreferences preferences) {
+        Object raw = values.get(PREF_KEY_BOTTOM_GAP_DP);
+        if (raw == null && !preferences.contains(PREF_KEY_BOTTOM_GAP_DP)) {
+            return GboardRoundedKeyboardConfig.DEFAULT_BOTTOM_GAP_DP;
+        }
+        final int parsed;
+        try {
+            if (raw instanceof Integer) {
+                parsed = (Integer) raw;
+            } else if (raw instanceof String) {
+                parsed = Integer.parseInt(((String) raw).trim());
+            } else {
+                return null;
+            }
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+        if (parsed < GboardRoundedKeyboardConfig.MIN_BOTTOM_GAP_DP
+                || parsed > GboardRoundedKeyboardConfig.MAX_BOTTOM_GAP_DP) {
             return null;
         }
         return parsed;

@@ -6,6 +6,8 @@ import app.morphe.patcher.util.proxy.mutableTypes.MutableMethod
 import com.android.tools.smali.dexlib2.AccessFlags
 import com.android.tools.smali.dexlib2.iface.instruction.OneRegisterInstruction
 import dev.jason.gboardpatches.patches.gboard.shared.addHelperMethodIfMissing
+import dev.jason.gboardpatches.patches.gboard.shared.GboardMethodTarget
+import dev.jason.gboardpatches.patches.gboard.shared.applyVoidExitLifecycleDelegate
 import dev.jason.gboardpatches.patches.gboard.shared.findMutableMethodOrThrow
 import dev.jason.gboardpatches.patches.gboard.shared.generated.GboardVersionBindings
 import dev.jason.gboardpatches.patches.gboard.shared.gboardPatchesExtensionCarrierPatch
@@ -28,7 +30,7 @@ private const val WRAPPER_COPY_WITH_RADII_HELPER =
     "jasondevRoundedKeyboardCopyWithRadii"
 
 internal val gboardRoundedKeyboardBytecodePatch = bytecodePatch(
-    description = "套用可設定的鍵盤面板圓角。",
+    description = "套用可設定的鍵盤面板圓角 + 底部貼齊導覽藥丸 (bottom gap killer)。",
 ) {
     compatibleWith(COMPATIBILITY_GBOARD)
     dependsOn(gboardPatchesExtensionCarrierPatch)
@@ -95,8 +97,22 @@ internal val gboardRoundedKeyboardBytecodePatch = bytecodePatch(
             )
         }
         styleMethod.injectRoundedKeyboardStyle()
+        // Bottom-gap killer: hook LatinIME.onStartInputView exit to force bottom padding
+        // to gapDp so keyboard sits just on top of gesture pill (no black strip).
+        // Same Loup targets as calculator lifecycle (18.0.3 verified).
+        findMutableMethodOrThrow(roundedKeyboardInputViewStarted).applyVoidExitLifecycleDelegate(
+            RuntimeCallId.ROUNDED_KEYBOARD_RUNTIME_ON_INPUT_VIEW_STARTED,
+            "p0 .. p0",
+        )
     }
 }
+
+private val roundedKeyboardInputViewStarted = GboardMethodTarget(
+    classType = "Loup;",
+    name = "onStartInputView",
+    parameterTypes = listOf("Landroid/view/inputmethod/EditorInfo;", "Z"),
+    returnType = "V",
+)
 
 private fun MutableMethod.injectRoundedKeyboardAdmission() {
     val abi = RuntimeAbiCatalog.abi(

@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/jasonwu1994/Gboard-patches/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/jasonwu1994/Gboard-patches?display_name=tag&label=Release&style=for-the-badge"></a>
   <a href="https://github.com/jasonwu1994/Gboard-patches"><img alt="Total downloads" src="https://img.shields.io/github/downloads/jasonwu1994/Gboard-patches/total?label=Downloads&style=for-the-badge"></a>
-  <a href="https://morphe.software/add-source?github=jasonwu1994/Gboard-patches"><img alt="Add to Morphe" src="https://img.shields.io/badge/Morphe-Add%20Source-00A8FF?style=for-the-badge"></a>
+  <a href="https://morphe.software/add-source?github=VectorJet/Gboard-patches"><img alt="Add to Morphe" src="https://img.shields.io/badge/Morphe-Add%20Source-00A8FF?style=for-the-badge"></a>
   <a href="https://github.com/jasonwu1994/Gboard-patches"><img alt="GitHub stars" src="https://img.shields.io/github/stars/jasonwu1994/Gboard-patches?style=social"></a>
 </p>
 
@@ -279,8 +279,8 @@ Features tailored to Traditional Chinese and Zhuyin input workflows.
 
 Add this repository as a Morphe source:
 
-- [Open in Morphe](https://morphe.software/add-source?github=jasonwu1994/Gboard-patches)
-- Or manually add `https://github.com/jasonwu1994/Gboard-patches`
+- [Open in Morphe](https://morphe.software/add-source?github=VectorJet/Gboard-patches)
+- Or manually add `https://github.com/VectorJet/Gboard-patches`
 
 ## Build
 
