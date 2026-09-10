@@ -43,6 +43,7 @@ jobs:
           aapt2 link -o navfix/build/out/navfix.apk \
             -I "$ANDROID_HOME/platforms/android-34/android.jar" \
             --manifest navfix/AndroidManifest.xml \
+            --min-sdk-version 26 --target-sdk-version 34 \
             navfix/build/compiled/navfix.zip \
             --auto-add-overlay
           ls -lh navfix/build/out/navfix.apk
