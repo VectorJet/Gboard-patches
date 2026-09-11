@@ -13,29 +13,24 @@ import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 
 /**
- * Clamps the bottom mandatory/system gesture insets as seen by Gboard so the
- * keyboard pads to the pill height (40px) instead of the 80px gesture strip.
- * Scope: Gboard packages only. System-wide insets and the swipe area untouched.
+ * Clamps the bottom gesture insets as seen by Gboard so the keyboard pads to
+ * the pill height (40px) instead of the 80px gesture strip. Scope: Gboard
+ * packages only.
  *
- * Strategy is layered (host bridge blocklists some WindowInsets members):
- *  1. Rewrite at View.dispatchApplyWindowInsets (choke point for listeners
- *     and views): rebuild the Insets with clamped gesture bottoms, so every
- *     downstream read - including getters the bridge refuses to hook - sees
- *     the fixed values.
- *  2. Direct clamps on every hookable getter/dimen path as backup.
+ * NOTE: only APIs present in the android-34 SDK stub may be referenced
+ * directly (getMandatorySystemGestures was removed from the stub); anything
+ * newer/uncertain goes through reflection with try/catch.
  */
 public class HookEntry implements IXposedHookLoadPackage {
     private static final String GBOARD = "com.google.android.inputmethod.latin";
     private static final String GBOARD_JASON = "dev.jason.com.google.android.inputmethod.latin";
-    // 16dp @ 400dpi == current navigationBars bottom inset. Gboard pads to
-    // max(nav, mandatory); clamping mandatory to the same value closes the gap.
     private static final int CLAMP_BOTTOM_PX = 40;
-    // Framework nav/gesture dimen family (direct-read backup path).
     private static final int[] DIMEN_IDS = {
             0x01050277, 0x01050278, 0x01050279};
 
@@ -44,6 +39,7 @@ public class HookEntry implements IXposedHookLoadPackage {
     private static Method sCtorClassForm;
     private static Method sCtorNameForm;
     private static int sClampLogs;
+    private static int sSpyLogs;
     private static Field[] sWinFields;
 
     @Override
@@ -56,14 +52,14 @@ public class HookEntry implements IXposedHookLoadPackage {
         if (!pickHook()) {
             return;
         }
+        auditInsetsApi();
         ClassLoader loader = lpparam.classLoader;
-        // Choke point: every listener/view receives insets through here.
         doHook(View.class, "android.view.View", loader, "dispatchApplyWindowInsets",
                 null, dispatchRewrite());
         doHook(WindowInsets.class, "android.view.WindowInsets", loader,
-                "getMandatorySystemGestures", null, getterClamp());
-        doHook(WindowInsets.class, "android.view.WindowInsets", loader,
                 "getSystemGestureInsets", null, getterClamp());
+        doHook(WindowInsets.class, "android.view.WindowInsets", loader,
+                "getTappableElementInsets", null, getterClamp());
         doHook(WindowInsets.class, "android.view.WindowInsets", loader,
                 "getInsets", new Class<?>[]{int.class}, maskedClamp());
         doHook(WindowInsets.class, "android.view.WindowInsets", loader,
@@ -75,6 +71,36 @@ public class HookEntry implements IXposedHookLoadPackage {
         doHook(Resources.class, "android.content.res.Resources", loader,
                 "getDimension", new Class<?>[]{int.class}, dimenFloatClamp());
         doHookCtor(loader, new Class<?>[]{Parcel.class}, ctorRewrite());
+    }
+
+    /** Log which gesture/mandatory/tappable members exist at runtime. */
+    private void auditInsetsApi() {
+        try {
+            StringBuilder sb = new StringBuilder("[GboardGapFix] api:");
+            for (Method m : WindowInsets.class.getDeclaredMethods()) {
+                String n = m.getName().toLowerCase();
+                if (n.contains("mandatory") || n.contains("tappable")
+                        || n.contains("gesture")) {
+                    sb.append(' ').append(m.getName()).append(';');
+                }
+            }
+            try {
+                Class<?> builder = Class.forName("android.view.WindowInsets$Builder");
+                for (Method m : builder.getDeclaredMethods()) {
+                    String n = m.getName().toLowerCase();
+                    if (n.contains("mandatory") || n.contains("tappable")
+                            || n.contains("gesture") || n.equals("setinsets")
+                            || n.equals("build")) {
+                        sb.append(" B.").append(m.getName()).append(';');
+                    }
+                }
+            } catch (Throwable t) {
+                sb.append(" Builder.?;");
+            }
+            XposedBridge.log(sb.toString());
+        } catch (Throwable t) {
+            XposedBridge.log("[GboardGapFix] audit failed: " + t);
+        }
     }
 
     private boolean pickHook() {
@@ -199,9 +225,9 @@ public class HookEntry implements IXposedHookLoadPackage {
         String out = t.getClass().getSimpleName();
         for (int i = 0; i < 3 && c.getCause() != null; i++) {
             c = c.getCause();
-            out += "<-" + c.getClass().getSimpleName()
-                    + ":" + String.valueOf(c.getMessage()).substring(0,
-                            Math.min(90, String.valueOf(c.getMessage()).length()));
+            String msg = String.valueOf(c.getMessage());
+            out += "<-" + c.getClass().getSimpleName() + ":"
+                    + msg.substring(0, Math.min(90, msg.length()));
         }
         return out;
     }
@@ -225,6 +251,13 @@ public class HookEntry implements IXposedHookLoadPackage {
         }
     }
 
+    private static void logSpy(String what) {
+        if (sSpyLogs < 8) {
+            sSpyLogs++;
+            XposedBridge.log("[GboardGapFix] SPY " + what);
+        }
+    }
+
     private static boolean isNavDimen(int id) {
         for (int d : DIMEN_IDS) {
             if (d == id) {
@@ -234,7 +267,48 @@ public class HookEntry implements IXposedHookLoadPackage {
         return false;
     }
 
-    /** Rebuild insets with clamped gesture bottoms (dispatch choke point). */
+    /**
+     * Rebuild insets with clamped gesture bottoms, using only reflection so a
+     * missing Builder API can never break the build: Builder(WindowInsets) +
+     * setInsets(int, Insets) + build().
+     */
+    private WindowInsets rebuildClamped(WindowInsets in, boolean[] changedOut) {
+        try {
+            Insets sys = in.getSystemGestureInsets();
+            Insets tap = null;
+            try {
+                tap = in.getTappableElementInsets();
+            } catch (Throwable ignored) {
+            }
+            Class<?> builderCls = Class.forName("android.view.WindowInsets$Builder");
+            Constructor<?> copyCtor = builderCls.getConstructor(WindowInsets.class);
+            Method setInsets = builderCls.getMethod("setInsets", int.class, Insets.class);
+            Object builder = null;
+            if (sys != null && sys.bottom > CLAMP_BOTTOM_PX) {
+                builder = copyCtor.newInstance(in);
+                setInsets.invoke(builder, WindowInsets.Type.systemGestures(),
+                        Insets.of(sys.left, sys.top, sys.right, CLAMP_BOTTOM_PX));
+                changedOut[0] = true;
+            }
+            if (tap != null && tap.bottom > CLAMP_BOTTOM_PX) {
+                if (builder == null) {
+                    builder = copyCtor.newInstance(in);
+                }
+                setInsets.invoke(builder, WindowInsets.Type.tappableElement(),
+                        Insets.of(tap.left, tap.top, tap.right, CLAMP_BOTTOM_PX));
+                changedOut[0] = true;
+            }
+            if (builder != null) {
+                Method build = builderCls.getMethod("build");
+                return (WindowInsets) build.invoke(builder);
+            }
+        } catch (Throwable t) {
+            logClamp("rebuild-fail " + t.getClass().getSimpleName(), -1);
+        }
+        return in;
+    }
+
+    /** Choke point: every listener/view receives insets through here. */
     private XC_MethodHook dispatchRewrite() {
         return new XC_MethodHook() {
             @Override
@@ -244,29 +318,11 @@ public class HookEntry implements IXposedHookLoadPackage {
                     if (in == null) {
                         return;
                     }
-                    Insets mand = in.getMandatorySystemGestures();
-                    Insets sys = in.getSystemGestureInsets();
-                    WindowInsets.Builder b = null;
-                    int from = -1;
-                    if (mand != null && mand.bottom > CLAMP_BOTTOM_PX) {
-                        b = new WindowInsets.Builder(in);
-                        b.setMandatorySystemGesturesInsets(Insets.of(mand.left,
-                                mand.top, mand.right, CLAMP_BOTTOM_PX));
-                        from = mand.bottom;
-                    }
-                    if (sys != null && sys.bottom > CLAMP_BOTTOM_PX) {
-                        if (b == null) {
-                            b = new WindowInsets.Builder(in);
-                        }
-                        b.setSystemGestureInsets(Insets.of(sys.left, sys.top,
-                                sys.right, CLAMP_BOTTOM_PX));
-                        if (from < 0) {
-                            from = sys.bottom;
-                        }
-                    }
-                    if (b != null) {
-                        logClamp("dispatch", from);
-                        param.setResult(b.build());
+                    boolean[] changed = new boolean[1];
+                    WindowInsets fixed = rebuildClamped(in, changed);
+                    if (changed[0] && fixed != in) {
+                        logClamp("dispatch", -1);
+                        param.setResult(fixed);
                     }
                 } catch (Throwable t) {
                     XposedBridge.log("[GboardGapFix] dispatch rewrite failed: " + t);
@@ -293,12 +349,18 @@ public class HookEntry implements IXposedHookLoadPackage {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
                 int mask = (Integer) param.args[0];
-                // Never touch IME-height queries; only gesture-containing masks.
+                // Never touch IME-height queries.
                 if ((mask & WindowInsets.Type.ime()) != 0) {
                     return;
                 }
-                if ((mask & WindowInsets.Type.mandatorySystemGestures()) == 0
-                        && (mask & WindowInsets.Type.systemGestures()) == 0) {
+                int want = WindowInsets.Type.systemGestures()
+                        | WindowInsets.Type.tappableElement();
+                try {
+                    want |= (Integer) WindowInsets.Type.class
+                            .getMethod("mandatorySystemGestures").invoke(null);
+                } catch (Throwable ignored) {
+                }
+                if ((mask & want) == 0) {
                     return;
                 }
                 Insets in = (Insets) param.getResult();
@@ -332,6 +394,12 @@ public class HookEntry implements IXposedHookLoadPackage {
                     logClamp("dimenPx/" + Integer.toHexString(id),
                             (Integer) param.getResult());
                     param.setResult(CLAMP_BOTTOM_PX);
+                    return;
+                }
+                // Spy: which dimens resolve to exactly the gap height?
+                Integer v = (Integer) param.getResult();
+                if (v != null && v == 80) {
+                    logSpy("dimenPx id=0x" + Integer.toHexString(id));
                 }
             }
         };
