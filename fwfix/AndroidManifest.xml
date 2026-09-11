@@ -1,16 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="dev.vectorjet.fwfix"
-    android:versionCode="1"
-    android:versionName="1.0">
+    android:versionCode="2"
+    android:versionName="1.1">
 
     <!-- Static framework RRO: shrink mandatory gesture inset so Gboard sits on the pill.
          navigation_bar_height keeps the Taskbar/pill intact; gesture height 32dp->16dp
-         cuts the reserved strip (80px->40px) without killing swipe. -->
+         cuts the reserved strip (80px->40px) without killing swipe.
+         Priority MAX: tie-break test vs Lineage's NavigationBarModeGestural overlay
+         (also MAX) for navigation_bar_gesture_height. -->
     <overlay
         android:targetPackage="android"
         android:isStatic="true"
-        android:priority="5" />
+        android:priority="2147483647" />
 
     <application android:hasCode="false" />
 </manifest>
