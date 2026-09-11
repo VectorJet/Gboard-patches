@@ -19,7 +19,8 @@ import java.lang.reflect.Modifier;
  *
  * Calls the host bridge's findAndHookMethod adaptively: Vector's legacy bridge
  * obfuscates the Xposed API and may not carry the canonical overloads, so we
- * enumerate them at runtime and invoke a compatible form via reflection.
+ * enumerate them at runtime and invoke a compatible form via reflection, with
+ * fallback to the alternate form when one throws.
  */
 public class HookEntry implements IXposedHookLoadPackage {
     private static final String GBOARD = "com.google.android.inputmethod.latin";
@@ -28,15 +29,9 @@ public class HookEntry implements IXposedHookLoadPackage {
     // max(nav, mandatory); clamping mandatory to the same value closes the gap.
     private static final int CLAMP_BOTTOM_PX = 40;
 
-    private static final class HookSpec {
-        final boolean classForm; // (Class, String, Object[]) vs (String, ClassLoader, String, Object[])
-        final Method method;
-
-        HookSpec(boolean classForm, Method method) {
-            this.classForm = classForm;
-            this.method = method;
-        }
-    }
+    private static Method sClassForm;
+    private static Method sNameForm;
+    private static boolean sLoggedClamp;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) {
@@ -45,24 +40,21 @@ public class HookEntry implements IXposedHookLoadPackage {
             return;
         }
         XposedBridge.log("[GboardGapFix] loaded in " + lpparam.packageName);
-        HookSpec spec = pickHook();
-        if (spec == null) {
+        if (!pickHook()) {
             return;
         }
-        doHook(spec, lpparam.classLoader, "getMandatorySystemGestures", null, getterClamp());
-        doHook(spec, lpparam.classLoader, "getSystemGestureInsets", null, getterClamp());
-        doHook(spec, lpparam.classLoader, "getInsets",
+        doHook(lpparam.classLoader, "getMandatorySystemGestures", null, getterClamp());
+        doHook(lpparam.classLoader, "getSystemGestureInsets", null, getterClamp());
+        doHook(lpparam.classLoader, "getInsets",
                 new Class<?>[]{int.class}, maskedClamp());
-        doHook(spec, lpparam.classLoader, "getInsetsIgnoringVisibility",
+        doHook(lpparam.classLoader, "getInsetsIgnoringVisibility",
                 new Class<?>[]{int.class}, maskedClamp());
     }
 
-    private HookSpec pickHook() {
+    private boolean pickHook() {
         try {
             Method[] methods = XposedHelpers.class.getDeclaredMethods();
             StringBuilder sb = new StringBuilder("[GboardGapFix] helpers:");
-            Method classForm = null;
-            Method nameForm = null;
             for (Method m : methods) {
                 if (!"findAndHookMethod".equals(m.getName())) {
                     continue;
@@ -74,31 +66,27 @@ public class HookEntry implements IXposedHookLoadPackage {
                 sb.append(' ').append(sig(p)).append(';');
                 if (p.length == 3 && p[0] == Class.class
                         && p[1] == String.class && p[2] == Object[].class) {
-                    classForm = m;
+                    sClassForm = m;
                 }
                 if (p.length == 4 && p[0] == String.class
                         && p[1] == ClassLoader.class
                         && p[2] == String.class && p[3] == Object[].class) {
-                    nameForm = m;
+                    sNameForm = m;
                 }
             }
             XposedBridge.log(sb.toString());
-            if (classForm != null) {
-                XposedBridge.log("[GboardGapFix] using (Class,String) form");
-                return new HookSpec(true, classForm);
+            if (sClassForm == null && sNameForm == null) {
+                XposedBridge.log("[GboardGapFix] NO compatible findAndHookMethod");
+                return false;
             }
-            if (nameForm != null) {
-                XposedBridge.log("[GboardGapFix] using (String,Loader) form");
-                return new HookSpec(false, nameForm);
-            }
-            XposedBridge.log("[GboardGapFix] NO compatible findAndHookMethod");
+            return true;
         } catch (Throwable t) {
             XposedBridge.log("[GboardGapFix] pick failed: " + t);
+            return false;
         }
-        return null;
     }
 
-    private void doHook(HookSpec spec, ClassLoader loader, String name,
+    private void doHook(ClassLoader loader, String name,
             Class<?>[] params, XC_MethodHook cb) {
         try {
             Object[] tail;
@@ -109,14 +97,28 @@ public class HookEntry implements IXposedHookLoadPackage {
                 System.arraycopy(params, 0, tail, 0, params.length);
                 tail[params.length] = cb;
             }
-            Object[] invokeArgs;
-            if (spec.classForm) {
-                invokeArgs = new Object[]{WindowInsets.class, name, tail};
-            } else {
-                invokeArgs = new Object[]{"android.view.WindowInsets", loader, name, tail};
+            Throwable firstError = null;
+            if (sClassForm != null) {
+                try {
+                    sClassForm.invoke(null,
+                            new Object[]{WindowInsets.class, name, tail});
+                    XposedBridge.log("[GboardGapFix] hooked " + name);
+                    return;
+                } catch (Throwable t) {
+                    firstError = t;
+                }
             }
-            spec.method.invoke(null, invokeArgs);
-            XposedBridge.log("[GboardGapFix] hooked " + name);
+            if (sNameForm != null) {
+                try {
+                    sNameForm.invoke(null, new Object[]{
+                            "android.view.WindowInsets", loader, name, tail});
+                    XposedBridge.log("[GboardGapFix] hooked " + name + " (name form)");
+                    return;
+                } catch (Throwable t) {
+                    firstError = t;
+                }
+            }
+            XposedBridge.log("[GboardGapFix] hook failed: " + name + " " + firstError);
         } catch (Throwable t) {
             XposedBridge.log("[GboardGapFix] hook failed: " + name + " " + t);
         }
@@ -133,12 +135,21 @@ public class HookEntry implements IXposedHookLoadPackage {
         return sb.append(')').toString();
     }
 
+    private static void logClampOnce(String what, int from) {
+        if (!sLoggedClamp) {
+            sLoggedClamp = true;
+            XposedBridge.log("[GboardGapFix] CLAMPED " + what + " bottom "
+                    + from + "->" + CLAMP_BOTTOM_PX);
+        }
+    }
+
     private XC_MethodHook getterClamp() {
         return new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
                 Insets in = (Insets) param.getResult();
                 if (in != null && in.bottom > CLAMP_BOTTOM_PX) {
+                    logClampOnce("getter", in.bottom);
                     param.setResult(Insets.of(in.left, in.top, in.right, CLAMP_BOTTOM_PX));
                 }
             }
@@ -160,6 +171,7 @@ public class HookEntry implements IXposedHookLoadPackage {
                 }
                 Insets in = (Insets) param.getResult();
                 if (in != null && in.bottom > CLAMP_BOTTOM_PX) {
+                    logClampOnce("masked/" + mask, in.bottom);
                     param.setResult(Insets.of(in.left, in.top, in.right, CLAMP_BOTTOM_PX));
                 }
             }
