@@ -3,6 +3,7 @@ package dev.vectorjet.gboardfix;
 import android.content.res.Resources;
 import android.graphics.Insets;
 import android.graphics.Rect;
+import android.os.Parcel;
 import android.view.WindowInsets;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
@@ -11,6 +12,7 @@ import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 
@@ -37,7 +39,10 @@ public class HookEntry implements IXposedHookLoadPackage {
 
     private static Method sClassForm;
     private static Method sNameForm;
+    private static Method sCtorClassForm;
+    private static Method sCtorNameForm;
     private static int sClampLogs;
+    private static Field[] sWinFields;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) {
@@ -58,6 +63,10 @@ public class HookEntry implements IXposedHookLoadPackage {
         doHookRes("getDimensionPixelSize", new Class<?>[]{int.class}, dimenIntClamp());
         doHookRes("getDimension", new Class<?>[]{int.class}, dimenFloatClamp());
         doHookSysWin();
+        // Birth-rewrite: every cross-process Insets arrives via the Parcel
+        // constructor. Clamping bottoms there covers even read paths whose
+        // getters the bridge refuses to hook.
+        doHookCtor(lpparam.classLoader, new Class<?>[]{Parcel.class}, ctorRewrite());
     }
 
     private boolean pickHook() {
@@ -85,6 +94,16 @@ public class HookEntry implements IXposedHookLoadPackage {
                         && p[1] == ClassLoader.class
                         && p[2] == String.class && p[3] == Object[].class) {
                     sNameForm = m;
+                }
+                if (!"findAndHookConstructor".equals(m.getName())) {
+                    continue;
+                }
+                if (p.length == 2 && p[0] == Class.class && p[1] == Object[].class) {
+                    sCtorClassForm = m;
+                }
+                if (p.length == 3 && p[0] == String.class
+                        && p[1] == ClassLoader.class && p[2] == Object[].class) {
+                    sCtorNameForm = m;
                 }
             }
             XposedBridge.log(sb.toString());
@@ -198,6 +217,89 @@ public class HookEntry implements IXposedHookLoadPackage {
         } catch (Throwable t) {
             XposedBridge.log("[GboardGapFix] hook failed: getSystemWindowInsets " + t);
         }
+    }
+
+    private void doHookCtor(ClassLoader loader, Class<?>[] params, XC_MethodHook cb) {
+        Object[] tail = new Object[params.length + 1];
+        System.arraycopy(params, 0, tail, 0, params.length);
+        tail[params.length] = cb;
+        if (sCtorClassForm != null) {
+            try {
+                sCtorClassForm.invoke(null, new Object[]{WindowInsets.class, tail});
+                XposedBridge.log("[GboardGapFix] hooked ctor");
+                return;
+            } catch (Throwable t) {
+                XposedBridge.log("[GboardGapFix] ctor class form: " + t);
+            }
+        }
+        if (sCtorNameForm != null) {
+            try {
+                sCtorNameForm.invoke(null, new Object[]{
+                        "android.view.WindowInsets", loader, tail});
+                XposedBridge.log("[GboardGapFix] hooked ctor (name form)");
+                return;
+            } catch (Throwable t) {
+                XposedBridge.log("[GboardGapFix] ctor name form: " + t);
+            }
+        }
+        if (sCtorClassForm == null && sCtorNameForm == null) {
+            XposedBridge.log("[GboardGapFix] NO ctor hook form available");
+        }
+    }
+
+    private XC_MethodHook ctorRewrite() {
+        return new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) {
+                try {
+                    if (sWinFields == null) {
+                        Field[] fs = WindowInsets.class.getDeclaredFields();
+                        for (Field f : fs) {
+                            f.setAccessible(true);
+                        }
+                        sWinFields = fs;
+                    }
+                    Object win = param.thisObject;
+                    int n = 0;
+                    for (Field f : sWinFields) {
+                        Class<?> t = f.getType();
+                        if (t == Insets.class) {
+                            Insets v = (Insets) f.get(win);
+                            if (v != null && v.bottom > CLAMP_BOTTOM_PX) {
+                                f.set(win, Insets.of(v.left, v.top, v.right,
+                                        CLAMP_BOTTOM_PX));
+                                n++;
+                            }
+                        } else if (t == Insets[].class) {
+                            Insets[] arr = (Insets[]) f.get(win);
+                            if (arr != null) {
+                                for (int i = 0; i < arr.length; i++) {
+                                    Insets v = arr[i];
+                                    if (v != null && v.bottom > CLAMP_BOTTOM_PX) {
+                                        arr[i] = Insets.of(v.left, v.top, v.right,
+                                                CLAMP_BOTTOM_PX);
+                                        n++;
+                                    }
+                                }
+                            }
+                        } else if (t == Rect.class) {
+                            Rect r = (Rect) f.get(win);
+                            if (r != null && r.bottom > CLAMP_BOTTOM_PX) {
+                                f.set(win, new Rect(r.left, r.top, r.right,
+                                        CLAMP_BOTTOM_PX));
+                                n++;
+                            }
+                        }
+                    }
+                    if (n > 0 && sClampLogs < 6) {
+                        sClampLogs++;
+                        XposedBridge.log("[GboardGapFix] REWROTE ctor fields=" + n);
+                    }
+                } catch (Throwable t) {
+                    XposedBridge.log("[GboardGapFix] ctor rewrite failed: " + t);
+                }
+            }
+        };
     }
 
     private static String sig(Class<?>[] p) {
