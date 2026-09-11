@@ -18,6 +18,6 @@
             android:value="93" />
         <meta-data
             android:name="xposedscope"
-            android:value="com.google.android.inputmethod.latin" />
+            android:value="com.google.android.inputmethod.latin,dev.jason.com.google.android.inputmethod.latin" />
     </application>
 </manifest>

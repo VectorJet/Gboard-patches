@@ -17,13 +17,15 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  */
 public class HookEntry implements IXposedHookLoadPackage {
     private static final String GBOARD = "com.google.android.inputmethod.latin";
+    private static final String GBOARD_JASON = "dev.jason.com.google.android.inputmethod.latin";
     // 16dp @ 400dpi == current navigationBars bottom inset. Gboard pads to
     // max(nav, mandatory); clamping mandatory to the same value closes the gap.
     private static final int CLAMP_BOTTOM_PX = 40;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) {
-        if (!GBOARD.equals(lpparam.packageName)) {
+        if (!GBOARD.equals(lpparam.packageName)
+                && !GBOARD_JASON.equals(lpparam.packageName)) {
             return;
         }
         XposedBridge.log("[GboardGapFix] loaded in " + lpparam.packageName);
