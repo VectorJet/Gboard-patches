@@ -6,6 +6,7 @@ on:
     paths:
       - 'navfix/**'
       - 'fwfix/**'
+      - 'module-pinned/**'
       - '.github/workflows/build-navfix.yml'
     branches:
       - main
@@ -99,19 +100,23 @@ jobs:
           set -eux
           MOD_DIR=module/system/product/overlay
           mkdir -p "$MOD_DIR"
-          cp navfix/build/out/navfix-signed.apk "$MOD_DIR/"
-          cp navfix/build/out/fwfix-signed.apk "$MOD_DIR/"
-          cp navfix/build/out/gestfix-signed.apk "$MOD_DIR/"
+          # navfix/gestfix are PINNED to the key-A builds: PMS rejects same-package
+          # updates signed with a different cert, and CI rotates debug keys each run.
+          cp module-pinned/navfix-signed.apk "$MOD_DIR/"
+          cp module-pinned/gestfix-signed.apk "$MOD_DIR/"
+          # fwfix2 is a fresh package name (no cert history) carrying the MAX-priority
+          # tie-break test vs Lineage's NavigationBarModeGestural overlay.
+          cp navfix/build/out/fwfix-signed.apk "$MOD_DIR/fwfix2-signed.apk"
           cat > module/module.prop <<'EOF'
           id=navfix_overlays
           name=Navfix Overlays (framework + Taskbar)
-          version=v1.1
-          versionCode=2
+          version=v1.2
+          versionCode=3
           author=VectorJet
-          description=Static RROs: shrinks mandatory gesture inset + Taskbar strip so Gboard sits on the pill.
+          description=Static RROs: fwfix2 (MAX prio tie-break) + navfix + gestfix; Gboard sits on the pill.
           EOF
           cat > module/customize.sh <<'EOF'
-          ui_print "Installing navfix + fwfix + gestfix static overlays..."
+          ui_print "Installing navfix + fwfix2 + gestfix static overlays..."
           ui_print "Exactly one reboot required; toggle nothing after."
           EOF
           (cd module && zip -qr ../navfix-module.zip .)
