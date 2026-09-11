@@ -1,6 +1,8 @@
 package dev.vectorjet.gboardfix;
 
+import android.content.res.Resources;
 import android.graphics.Insets;
+import android.graphics.Rect;
 import android.view.WindowInsets;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
@@ -28,6 +30,9 @@ public class HookEntry implements IXposedHookLoadPackage {
     // 16dp @ 400dpi == current navigationBars bottom inset. Gboard pads to
     // max(nav, mandatory); clamping mandatory to the same value closes the gap.
     private static final int CLAMP_BOTTOM_PX = 40;
+    // android.dimen.navigation_bar_gesture_height (framework). Gboard may read
+    // the dimen directly instead of the dispatched insets.
+    private static final int ID_GESTURE_HEIGHT = 0x01050277;
 
     private static Method sClassForm;
     private static Method sNameForm;
@@ -49,6 +54,9 @@ public class HookEntry implements IXposedHookLoadPackage {
                 new Class<?>[]{int.class}, maskedClamp());
         doHook(lpparam.classLoader, "getInsetsIgnoringVisibility",
                 new Class<?>[]{int.class}, maskedClamp());
+        doHookRes("getDimensionPixelSize", new Class<?>[]{int.class}, dimenIntClamp());
+        doHookRes("getDimension", new Class<?>[]{int.class}, dimenFloatClamp());
+        doHookSysWin();
     }
 
     private boolean pickHook() {
@@ -124,6 +132,67 @@ public class HookEntry implements IXposedHookLoadPackage {
         }
     }
 
+    private void doHookRes(String name, Class<?>[] params, XC_MethodHook cb) {
+        try {
+            Object[] tail = new Object[params.length + 1];
+            System.arraycopy(params, 0, tail, 0, params.length);
+            tail[params.length] = cb;
+            Throwable firstError = null;
+            if (sClassForm != null) {
+                try {
+                    sClassForm.invoke(null,
+                            new Object[]{Resources.class, name, tail});
+                    XposedBridge.log("[GboardGapFix] hooked res " + name);
+                    return;
+                } catch (Throwable t) {
+                    firstError = t;
+                }
+            }
+            if (sNameForm != null) {
+                try {
+                    sNameForm.invoke(null, new Object[]{
+                            "android.content.res.Resources",
+                            HookEntry.class.getClassLoader(), name, tail});
+                    XposedBridge.log("[GboardGapFix] hooked res " + name + " (name form)");
+                    return;
+                } catch (Throwable t) {
+                    firstError = t;
+                }
+            }
+            XposedBridge.log("[GboardGapFix] hook failed: res " + name + " " + firstError);
+        } catch (Throwable t) {
+            XposedBridge.log("[GboardGapFix] hook failed: res " + name + " " + t);
+        }
+    }
+
+    private void doHookSysWin() {
+        XC_MethodHook cb = new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) {
+                Rect r = (Rect) param.getResult();
+                if (r != null && r.bottom > CLAMP_BOTTOM_PX) {
+                    logClampOnce("syswin", r.bottom);
+                    param.setResult(new Rect(r.left, r.top, r.right, CLAMP_BOTTOM_PX));
+                }
+            }
+        };
+        try {
+            Object[] tail = new Object[]{cb};
+            if (sClassForm != null) {
+                try {
+                    sClassForm.invoke(null,
+                            new Object[]{WindowInsets.class, "getSystemWindowInsets", tail});
+                    XposedBridge.log("[GboardGapFix] hooked getSystemWindowInsets");
+                    return;
+                } catch (Throwable t) {
+                    XposedBridge.log("[GboardGapFix] syswin class form: " + t);
+                }
+            }
+        } catch (Throwable t) {
+            XposedBridge.log("[GboardGapFix] hook failed: getSystemWindowInsets " + t);
+        }
+    }
+
     private static String sig(Class<?>[] p) {
         StringBuilder sb = new StringBuilder("(");
         for (int i = 0; i < p.length; i++) {
@@ -151,6 +220,32 @@ public class HookEntry implements IXposedHookLoadPackage {
                 if (in != null && in.bottom > CLAMP_BOTTOM_PX) {
                     logClampOnce("getter", in.bottom);
                     param.setResult(Insets.of(in.left, in.top, in.right, CLAMP_BOTTOM_PX));
+                }
+            }
+        };
+    }
+
+    private XC_MethodHook dimenIntClamp() {
+        return new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) {
+                int id = (Integer) param.args[0];
+                if (id == ID_GESTURE_HEIGHT) {
+                    logClampOnce("dimenPx", (Integer) param.getResult());
+                    param.setResult(CLAMP_BOTTOM_PX);
+                }
+            }
+        };
+    }
+
+    private XC_MethodHook dimenFloatClamp() {
+        return new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) {
+                int id = (Integer) param.args[0];
+                if (id == ID_GESTURE_HEIGHT) {
+                    logClampOnce("dimen", ((Float) param.getResult()).intValue());
+                    param.setResult((float) CLAMP_BOTTOM_PX);
                 }
             }
         };
