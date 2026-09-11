@@ -30,13 +30,14 @@ public class HookEntry implements IXposedHookLoadPackage {
     // 16dp @ 400dpi == current navigationBars bottom inset. Gboard pads to
     // max(nav, mandatory); clamping mandatory to the same value closes the gap.
     private static final int CLAMP_BOTTOM_PX = 40;
-    // android.dimen.navigation_bar_gesture_height (framework). Gboard may read
-    // the dimen directly instead of the dispatched insets.
-    private static final int ID_GESTURE_HEIGHT = 0x01050277;
+    // Framework nav/gesture dimen family. Gboard may read one of these directly
+    // instead of the dispatched insets: gesture_height, frame_height, height.
+    private static final int[] DIMEN_IDS = {
+            0x01050277, 0x01050278, 0x01050279};
 
     private static Method sClassForm;
     private static Method sNameForm;
-    private static boolean sLoggedClamp;
+    private static int sClampLogs;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) {
@@ -63,11 +64,15 @@ public class HookEntry implements IXposedHookLoadPackage {
         try {
             Method[] methods = XposedHelpers.class.getDeclaredMethods();
             StringBuilder sb = new StringBuilder("[GboardGapFix] helpers:");
+            StringBuilder all = new StringBuilder("[GboardGapFix] all:");
             for (Method m : methods) {
-                if (!"findAndHookMethod".equals(m.getName())) {
+                if (!Modifier.isStatic(m.getModifiers())) {
                     continue;
                 }
-                if (!Modifier.isStatic(m.getModifiers())) {
+                all.append(' ').append(m.getName()).append(sig(m.getParameterTypes()))
+                        .append(';');
+                if (!"findAndHookMethod".equals(m.getName())
+                        && !"findAndHookConstructor".equals(m.getName())) {
                     continue;
                 }
                 Class<?>[] p = m.getParameterTypes();
@@ -83,6 +88,8 @@ public class HookEntry implements IXposedHookLoadPackage {
                 }
             }
             XposedBridge.log(sb.toString());
+            String allStr = all.toString();
+            XposedBridge.log(allStr.length() > 950 ? allStr.substring(0, 950) : allStr);
             if (sClassForm == null && sNameForm == null) {
                 XposedBridge.log("[GboardGapFix] NO compatible findAndHookMethod");
                 return false;
@@ -205,11 +212,20 @@ public class HookEntry implements IXposedHookLoadPackage {
     }
 
     private static void logClampOnce(String what, int from) {
-        if (!sLoggedClamp) {
-            sLoggedClamp = true;
+        if (sClampLogs < 6) {
+            sClampLogs++;
             XposedBridge.log("[GboardGapFix] CLAMPED " + what + " bottom "
                     + from + "->" + CLAMP_BOTTOM_PX);
         }
+    }
+
+    private static boolean isNavDimen(int id) {
+        for (int d : DIMEN_IDS) {
+            if (d == id) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private XC_MethodHook getterClamp() {
@@ -230,8 +246,9 @@ public class HookEntry implements IXposedHookLoadPackage {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
                 int id = (Integer) param.args[0];
-                if (id == ID_GESTURE_HEIGHT) {
-                    logClampOnce("dimenPx", (Integer) param.getResult());
+                if (isNavDimen(id)) {
+                    logClampOnce("dimenPx/" + Integer.toHexString(id),
+                            (Integer) param.getResult());
                     param.setResult(CLAMP_BOTTOM_PX);
                 }
             }
@@ -243,8 +260,9 @@ public class HookEntry implements IXposedHookLoadPackage {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
                 int id = (Integer) param.args[0];
-                if (id == ID_GESTURE_HEIGHT) {
-                    logClampOnce("dimen", ((Float) param.getResult()).intValue());
+                if (isNavDimen(id)) {
+                    logClampOnce("dimen/" + Integer.toHexString(id),
+                            ((Float) param.getResult()).intValue());
                     param.setResult((float) CLAMP_BOTTOM_PX);
                 }
             }
