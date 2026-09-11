@@ -124,3 +124,4 @@ jobs:
             navfix-module.zip
             navfix/build/out/*.apk
             fwfix/build/out/*.apk
+            gestfix/build/out/*.apk
