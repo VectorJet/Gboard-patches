@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Override the substrate overlay's own value for the gesture height.
+         32dp(80px) -> 16dp(40px): keyboard sits right on the pill. -->
+    <dimen name="navigation_bar_gesture_height">16dp</dimen>
+</resources>

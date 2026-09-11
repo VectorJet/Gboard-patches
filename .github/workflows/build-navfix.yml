@@ -62,6 +62,19 @@ jobs:
             --auto-add-overlay
           aapt2 dump resources fwfix/build/out/fwfix.apk | head -n 40 || true
 
+      - name: Build gestfix.apk (gestural-overlay target)
+        run: |
+          set -eux
+          mkdir -p gestfix/build/compiled gestfix/build/out
+          aapt2 compile --dir gestfix/res -o gestfix/build/compiled/gestfix.zip
+          aapt2 link -o gestfix/build/out/gestfix.apk \
+            -I "$ANDROID_HOME/platforms/android-34/android.jar" \
+            --manifest gestfix/AndroidManifest.xml \
+            --min-sdk-version 26 --target-sdk-version 34 \
+            gestfix/build/compiled/gestfix.zip \
+            --auto-add-overlay
+          aapt2 dump resources gestfix/build/out/gestfix.apk | head -n 40 || true
+
       - name: Sign with debug key
         run: |
           set -eux
@@ -75,7 +88,11 @@ jobs:
           apksigner sign --ks /tmp/modkey.jks --ks-pass pass:android \
             --key-pass pass:android --out fwfix/build/out/fwfix-signed.apk \
             fwfix/build/out/fwfix.apk
+          apksigner sign --ks /tmp/modkey.jks --ks-pass pass:android \
+            --key-pass pass:android --out gestfix/build/out/gestfix-signed.apk \
+            gestfix/build/out/gestfix.apk
           cp fwfix/build/out/fwfix-signed.apk navfix/build/out/
+          cp gestfix/build/out/gestfix-signed.apk navfix/build/out/
 
       - name: Package Magisk module
         run: |
@@ -84,16 +101,17 @@ jobs:
           mkdir -p "$MOD_DIR"
           cp navfix/build/out/navfix-signed.apk "$MOD_DIR/"
           cp navfix/build/out/fwfix-signed.apk "$MOD_DIR/"
+          cp navfix/build/out/gestfix-signed.apk "$MOD_DIR/"
           cat > module/module.prop <<'EOF'
           id=navfix_overlays
           name=Navfix Overlays (framework + Taskbar)
-          version=v1.0
-          versionCode=1
+          version=v1.1
+          versionCode=2
           author=VectorJet
           description=Static RROs: shrinks mandatory gesture inset + Taskbar strip so Gboard sits on the pill.
           EOF
           cat > module/customize.sh <<'EOF'
-          ui_print "Installing navfix + fwfix static overlays..."
+          ui_print "Installing navfix + fwfix + gestfix static overlays..."
           ui_print "Exactly one reboot required; toggle nothing after."
           EOF
           (cd module && zip -qr ../navfix-module.zip .)

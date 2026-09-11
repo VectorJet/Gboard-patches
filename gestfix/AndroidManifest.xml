@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="dev.vectorjet.gestfix"
+    android:versionCode="1"
+    android:versionName="1.0">
+
+    <!-- Static RRO targeting Lineage's gestural-nav overlay package itself.
+         Lineage's NavigationBarModeGestural overlay sets android:dimen/navigation_bar_gesture_height
+         at priority MAX, so a direct android override can never win. Chaining an
+         overlay on the overlay package lets us win anyway. -->
+    <overlay
+        android:targetPackage="com.android.internal.systemui.navbar.gestural"
+        android:isStatic="true"
+        android:priority="99" />
+
+    <application android:hasCode="false" />
+</manifest>
