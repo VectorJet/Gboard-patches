@@ -1,10 +1,11 @@
-name: Build navfix overlay
+name: Build navfix + fwfix overlays (Magisk module)
 
 on:
   workflow_dispatch:
   push:
     paths:
       - 'navfix/**'
+      - 'fwfix/**'
       - '.github/workflows/build-navfix.yml'
     branches:
       - main
@@ -13,7 +14,7 @@ on:
 
 jobs:
   build:
-    name: Build navfix RRO
+    name: Build overlay RROs + Magisk module
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -35,7 +36,7 @@ jobs:
           sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
           echo "$ANDROID_HOME/build-tools/34.0.0" >> "$GITHUB_PATH"
 
-      - name: Compile + link overlay
+      - name: Build navfix.apk (NexusLauncher target)
         run: |
           set -eux
           mkdir -p navfix/build/compiled navfix/build/out
@@ -46,23 +47,62 @@ jobs:
             --min-sdk-version 26 --target-sdk-version 34 \
             navfix/build/compiled/navfix.zip \
             --auto-add-overlay
-          ls -lh navfix/build/out/navfix.apk
           aapt2 dump resources navfix/build/out/navfix.apk | head -n 40 || true
 
-      - name: Sign APK (ephemeral debug key, no secrets needed)
+      - name: Build fwfix.apk (framework android target)
         run: |
           set -eux
-          keytool -genkeypair -v -keystore /tmp/navfix-debug.jks -alias navfix \
+          mkdir -p fwfix/build/compiled fwfix/build/out
+          aapt2 compile --dir fwfix/res -o fwfix/build/compiled/fwfix.zip
+          aapt2 link -o fwfix/build/out/fwfix.apk \
+            -I "$ANDROID_HOME/platforms/android-34/android.jar" \
+            --manifest fwfix/AndroidManifest.xml \
+            --min-sdk-version 26 --target-sdk-version 34 \
+            fwfix/build/compiled/fwfix.zip \
+            --auto-add-overlay
+          aapt2 dump resources fwfix/build/out/fwfix.apk | head -n 40 || true
+
+      - name: Sign with debug key
+        run: |
+          set -eux
+          keytool -genkeypair -v -keystore /tmp/modkey.jks -alias mod \
             -keyalg RSA -keysize 2048 -validity 10950 \
             -storepass android -keypass android \
             -dname "CN=navfix, OU=dev, O=vectorjet, C=US"
-          apksigner sign --ks /tmp/navfix-debug.jks --ks-pass pass:android \
+          apksigner sign --ks /tmp/modkey.jks --ks-pass pass:android \
             --key-pass pass:android --out navfix/build/out/navfix-signed.apk \
             navfix/build/out/navfix.apk
-          ls -lh navfix/build/out/
+          apksigner sign --ks /tmp/modkey.jks --ks-pass pass:android \
+            --key-pass pass:android --out fwfix/build/out/fwfix-signed.apk \
+            fwfix/build/out/fwfix.apk
+          cp fwfix/build/out/fwfix-signed.apk navfix/build/out/
 
-      - name: Upload artifact
+      - name: Package Magisk module
+        run: |
+          set -eux
+          MOD_DIR=module/system/product/overlay
+          mkdir -p "$MOD_DIR"
+          cp navfix/build/out/navfix-signed.apk "$MOD_DIR/"
+          cp navfix/build/out/fwfix-signed.apk "$MOD_DIR/"
+          cat > module/module.prop <<'EOF'
+          id=navfix_overlays
+          name=Navfix Overlays (framework + Taskbar)
+          version=v1.0
+          versionCode=1
+          author=VectorJet
+          description=Static RROs: shrinks mandatory gesture inset + Taskbar strip so Gboard sits on the pill.
+          EOF
+          cat > module/customize.sh <<'EOF'
+          ui_print "Installing navfix + fwfix static overlays..."
+          ui_print "Exactly one reboot required; toggle nothing after."
+          EOF
+          (cd module && zip -qr ../navfix-module.zip .)
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: navfix-apk
-          path: navfix/build/out/*.apk
+          name: navfix-module
+          path: |
+            navfix-module.zip
+            navfix/build/out/*.apk
+            fwfix/build/out/*.apk

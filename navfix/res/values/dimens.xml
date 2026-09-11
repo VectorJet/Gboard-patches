@@ -1,14 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Shrink Taskbar nav inset so Gboard sits just on top of the pill.
-         Stock Taskbar window is fillx60 (~24dp @400dpi); mandatory gestures add ~80px.
-         These cut the visual strip without killing swipe. Tune 0-24dp, reboot + retest.
-         If a name doesn't exist in your NexusLauncher version, aapt2 link warns and skips it. -->
-    <dimen name="taskbar_bottom_margin">0dp</dimen>
-    <dimen name="taskbar_stashed_height">20dp</dimen>
+    <!-- NexusLauncher Taskbar static RRO: shrink the 60px taskbar strip so the gap
+         between Gboard and the pill closes. Real names verified via cmd overlay lookup:
+         taskbar_stashed_size (24dp)=the Taskbar window height; missing names are skipped. -->
+    <dimen name="taskbar_stashed_size">16dp</dimen>
     <dimen name="taskbar_stashed_handle_height">4dp</dimen>
     <dimen name="taskbar_hotseat_nav_spacing">0dp</dimen>
-    <dimen name="taskbar_nudge_pill_height">4dp</dimen>
-    <dimen name="taskbar_running_app_indicator_height">1dp</dimen>
-    <dimen name="navigation_bar_height">20dp</dimen>
 </resources>

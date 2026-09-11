@@ -4,12 +4,12 @@
     android:versionCode="1"
     android:versionName="1.0">
 
-    <!-- Runtime Resource Overlay shrinking Pixel Launcher Taskbar nav inset.
-         Target: com.google.android.apps.nexuslauncher (provides navigationBars
-         via Taskbar window fillx60 on Lineage lyriq). -->
+    <!-- Static RRO shrinking Pixel Launcher Taskbar window (fillx60 nav inset).
+         Installed by the companion Magisk module into /product/overlay so idmap
+         is granted without signature/overlayable. -->
     <overlay
         android:targetPackage="com.google.android.apps.nexuslauncher"
-        android:isStatic="false"
+        android:isStatic="true"
         android:priority="10" />
 
     <application android:hasCode="false" />

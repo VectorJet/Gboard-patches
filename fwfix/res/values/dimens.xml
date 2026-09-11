@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Gesture navigation mandatory inset: 32dp -> 16dp (80px->40px).
+         The keyboard then sits just above the pill. Tune 0-32dp.
+         navigation_bar_height left alone so the pill/Taskbar stay intact. -->
+    <dimen name="navigation_bar_gesture_height">16dp</dimen>
+    <dimen name="navigation_bar_gesture_height_landscape">16dp</dimen>
+</resources>
