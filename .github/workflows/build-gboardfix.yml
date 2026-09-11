@@ -1,0 +1,84 @@
+name: Build GboardGapFix LSPosed module
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'lsposed-module/**'
+      - '.github/workflows/build-gboardfix.yml'
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build GboardGapFix APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install platform + build-tools
+        run: |
+          sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
+          echo "$ANDROID_HOME/build-tools/34.0.0" >> "$GITHUB_PATH"
+
+      - name: Check stable keystore
+        run: |
+          test -f lsposed-module/modkey.jks \
+            || { echo "modkey.jks missing - run the genkey workflow first"; exit 1; }
+
+      - name: Build APK (javac + aapt2 + d8, no gradle)
+        run: |
+          set -eux
+          M=lsposed-module
+          OUT=$M/build/out
+          OBJ=$M/build/obj
+          STUB=$M/build/stub-classes
+          AJAR="$ANDROID_HOME/platforms/android-34/android.jar"
+          mkdir -p "$OUT" "$OBJ" "$STUB"
+          # 1. compile Xposed API stubs (compile-only, never dexed)
+          find "$M/stubs" -name "*.java" > stubs.txt
+          javac -source 11 -target 11 -cp "$AJAR" -d "$STUB" @stubs.txt
+          # 2. link base APK (manifest only, no resources)
+          aapt2 link -o "$OUT/base.apk" -I "$AJAR" \
+            --manifest "$M/AndroidManifest.xml" \
+            --min-sdk-version 29 --target-sdk-version 34
+          # 3. compile app against stubs + android
+          find "$M/src" -name "*.java" > app.txt
+          javac -source 11 -target 11 -cp "$AJAR:$STUB" -d "$OBJ" @app.txt
+          # 4. dex app classes only (stubs via --classpath, not packaged)
+          d8 --min-api 29 --lib "$AJAR" --classpath "$STUB" \
+            --output "$OUT" $(find "$OBJ" -name "*.class")
+          # 5. add dex + xposed_init, align, sign with stable key
+          mkdir -p "$OUT/pack/assets"
+          cp "$OUT/classes.dex" "$OUT/pack/classes.dex"
+          cp "$M/assets/xposed_init" "$OUT/pack/assets/"
+          (cd "$OUT/pack" && zip -g ../base.apk classes.dex assets/xposed_init)
+          mv "$OUT/base.apk" "$OUT/gboardgapfix-unsigned.apk"
+          zipalign -f 4 "$OUT/gboardgapfix-unsigned.apk" "$OUT/gboardgapfix.apk"
+          apksigner sign --ks "$M/modkey.jks" --ks-pass pass:android \
+            --key-pass pass:android --out "$OUT/gboardgapfix-signed.apk" \
+            "$OUT/gboardgapfix.apk"
+          apksigner verify --print-certs "$OUT/gboardgapfix-signed.apk" | head -n 5
+          # 6. fail if stub API leaked into the APK
+          unzip -l "$OUT/gboardgapfix-signed.apk"
+          if unzip -l "$OUT/gboardgapfix-signed.apk" | grep -q "de/robv"; then
+            echo "ERROR: xposed stubs leaked into APK"; exit 1;
+          fi
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: gboardgapfix
+          path: lsposed-module/build/out/gboardgapfix-signed.apk

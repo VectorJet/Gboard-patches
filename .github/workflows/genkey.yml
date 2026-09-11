@@ -1,0 +1,27 @@
+name: Generate stable module key
+
+on:
+  workflow_dispatch:
+
+jobs:
+  genkey:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Generate keystore
+        run: |
+          keytool -genkeypair -v -keystore modkey.jks -alias mod \
+            -keyalg RSA -keysize 2048 -validity 10950 \
+            -storepass android -keypass android \
+            -dname "CN=gboardfix, OU=dev, O=vectorjet, C=US"
+
+      - name: Upload keystore
+        uses: actions/upload-artifact@v4
+        with:
+          name: modkey
+          path: modkey.jks
